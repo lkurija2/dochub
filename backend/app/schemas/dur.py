@@ -6,6 +6,14 @@ from ..models.dur import DURStatus
 from .user import UserOut
 
 
+class DocumentBrief(BaseModel):
+    id: UUID
+    slug: str
+    title: str
+
+    model_config = {"from_attributes": True}
+
+
 class DURBase(BaseModel):
     title: str
     description: Optional[str] = None
@@ -37,6 +45,7 @@ class DUROut(DURBase):
 class DURWithUsers(DUROut):
     creator: UserOut
     reviewer: Optional[UserOut] = None
+    document: DocumentBrief
 
     model_config = {"from_attributes": True}
 

@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { durApi, docApi } from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
+import { Card, CardContent, CardHeader } from '../components/ui/card'
 import { Textarea } from '../components/ui/textarea'
 import { Separator } from '../components/ui/separator'
 import { Avatar, AvatarFallback } from '../components/ui/avatar'
@@ -23,15 +23,8 @@ function DiffView({ original, proposed }: { original: string; proposed: string }
   const originalLines = original.split('\n')
   const proposedLines = proposed.split('\n')
 
-  // Simple line-by-line diff
-  const maxLen = Math.max(originalLines.length, proposedLines.length)
   const diffLines: Array<{ type: 'same' | 'removed' | 'added'; content: string }> = []
 
-  // Very simple diff: show removed lines (in original, not in proposed) and added lines
-  const proposedSet = new Set(proposedLines)
-  const originalSet = new Set(originalLines)
-
-  // Build a unified diff view
   let i = 0, j = 0
   while (i < originalLines.length || j < proposedLines.length) {
     const origLine = originalLines[i]
@@ -59,9 +52,11 @@ function DiffView({ original, proposed }: { original: string; proposed: string }
         <div
           key={idx}
           className={`px-4 py-0.5 whitespace-pre-wrap ${
-            line.type === 'removed' ? 'bg-red-50 text-red-800 border-l-4 border-red-400 dark:bg-red-950 dark:text-red-200' :
-            line.type === 'added' ? 'bg-green-50 text-green-800 border-l-4 border-green-400 dark:bg-green-950 dark:text-green-200' :
-            'bg-background text-foreground border-l-4 border-transparent'
+            line.type === 'removed'
+              ? 'bg-red-50 text-red-800 border-l-4 border-red-400 dark:bg-red-950 dark:text-red-200'
+              : line.type === 'added'
+              ? 'bg-green-50 text-green-800 border-l-4 border-green-400 dark:bg-green-950 dark:text-green-200'
+              : 'bg-background text-foreground border-l-4 border-transparent'
           }`}
         >
           <span className="mr-2 select-none opacity-50">
@@ -76,7 +71,6 @@ function DiffView({ original, proposed }: { original: string; proposed: string }
 
 export function DURDetail() {
   const { slug, durId } = useParams<{ slug: string; durId: string }>()
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { user } = useAuth()
 
@@ -96,9 +90,10 @@ export function DURDetail() {
     enabled: !!slug && !!durId,
   })
 
+  // Fetch the current document content using the slug from the DUR response
   const { data: doc } = useQuery({
-    queryKey: ['doc-for-dur', dur?.document_id],
-    queryFn: () => dur ? docApi.get(slug!, dur.document?.slug).then(r => r.data) : null,
+    queryKey: ['doc', slug, dur?.document?.slug],
+    queryFn: () => docApi.get(slug!, dur!.document.slug).then(r => r.data),
     enabled: !!dur?.document?.slug,
   })
 
@@ -107,6 +102,7 @@ export function DURDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['dur', slug, durId] })
       queryClient.invalidateQueries({ queryKey: ['repo-durs', slug] })
+      queryClient.invalidateQueries({ queryKey: ['doc', slug, dur?.document?.slug] })
       setShowReviewInput(null)
     },
   })
@@ -132,7 +128,7 @@ export function DURDetail() {
   if (!dur) return <div className="p-8 text-center text-muted-foreground">DUR not found.</div>
 
   const isOpen = dur.status === 'open'
-  const canReview = user && (dur.creator?.id !== user.id || user.is_admin)
+  const canReview = user && user.id !== dur.created_by
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
@@ -152,9 +148,7 @@ export function DURDetail() {
         <div>
           <div className="flex items-center gap-3 mb-1">
             <h1 className="text-2xl font-bold">{dur.title}</h1>
-            <Badge variant={STATUS_COLORS[dur.status] || 'outline'}>
-              {dur.status}
-            </Badge>
+            <Badge variant={STATUS_COLORS[dur.status] || 'outline'}>{dur.status}</Badge>
           </div>
           {dur.description && (
             <p className="text-muted-foreground mt-1">{dur.description}</p>
@@ -164,9 +158,7 @@ export function DURDetail() {
               <Clock className="w-3 h-3" />
               Opened {new Date(dur.created_at).toLocaleDateString()}
             </span>
-            {dur.creator && (
-              <span>by <strong>{dur.creator.username}</strong></span>
-            )}
+            {dur.creator && <span>by <strong>{dur.creator.username}</strong></span>}
             {dur.document && (
               <span>
                 on{' '}
@@ -179,38 +171,35 @@ export function DURDetail() {
         </div>
       </div>
 
-      {/* Diff */}
+      {/* Diff tabs — single Tabs context wrapping both list and content */}
       <Card className="mb-6">
-        <CardHeader>
-          <Tabs defaultValue="diff">
+        <Tabs defaultValue="diff">
+          <CardHeader className="pb-0">
             <TabsList>
               <TabsTrigger value="diff">Diff</TabsTrigger>
               <TabsTrigger value="proposed">Proposed</TabsTrigger>
               <TabsTrigger value="current">Current</TabsTrigger>
             </TabsList>
-          </Tabs>
-        </CardHeader>
-        <CardContent>
-          <Tabs defaultValue="diff">
-            <TabsContent value="diff">
-              {doc ? (
-                <DiffView original={doc.current_content} proposed={dur.proposed_content} />
-              ) : (
-                <div className="text-sm text-muted-foreground">Loading diff...</div>
-              )}
+          </CardHeader>
+          <CardContent className="pt-4">
+            <TabsContent value="diff" className="mt-0">
+              {doc
+                ? <DiffView original={doc.current_content} proposed={dur.proposed_content} />
+                : <div className="text-sm text-muted-foreground py-4">Loading current document...</div>
+              }
             </TabsContent>
-            <TabsContent value="proposed">
+            <TabsContent value="proposed" className="mt-0">
               <pre className="text-xs font-mono whitespace-pre-wrap border rounded-md p-4 bg-muted/30 max-h-[500px] overflow-auto">
                 {dur.proposed_content}
               </pre>
             </TabsContent>
-            <TabsContent value="current">
+            <TabsContent value="current" className="mt-0">
               <pre className="text-xs font-mono whitespace-pre-wrap border rounded-md p-4 bg-muted/30 max-h-[500px] overflow-auto">
-                {doc?.current_content || 'Loading...'}
+                {doc?.current_content ?? 'Loading...'}
               </pre>
             </TabsContent>
-          </Tabs>
-        </CardContent>
+          </CardContent>
+        </Tabs>
       </Card>
 
       {/* Review result */}
@@ -218,18 +207,18 @@ export function DURDetail() {
         <Card className={`mb-6 border-l-4 ${dur.status === 'merged' ? 'border-l-green-500' : 'border-l-red-500'}`}>
           <CardContent className="pt-4">
             <div className="flex items-center gap-2 mb-1">
-              {dur.status === 'merged' ? (
-                <GitMerge className="w-4 h-4 text-green-500" />
-              ) : (
-                <XCircle className="w-4 h-4 text-red-500" />
-              )}
+              {dur.status === 'merged'
+                ? <GitMerge className="w-4 h-4 text-green-500" />
+                : <XCircle className="w-4 h-4 text-red-500" />
+              }
               <span className="font-medium text-sm">
-                {dur.status === 'merged' ? 'Merged' : 'Rejected'} by{' '}
-                {dur.reviewer?.username || 'reviewer'}
+                {dur.status === 'merged' ? 'Merged' : 'Rejected'} by {dur.reviewer?.username ?? 'reviewer'}
               </span>
-              <span className="text-xs text-muted-foreground">
-                {dur.reviewed_at && new Date(dur.reviewed_at).toLocaleDateString()}
-              </span>
+              {dur.reviewed_at && (
+                <span className="text-xs text-muted-foreground">
+                  {new Date(dur.reviewed_at).toLocaleDateString()}
+                </span>
+              )}
             </div>
             <p className="text-sm text-muted-foreground">{dur.review_comment}</p>
           </CardContent>
@@ -243,7 +232,7 @@ export function DURDetail() {
             {showReviewInput ? (
               <div className="space-y-3">
                 <Textarea
-                  placeholder={`Add a review comment (optional)...`}
+                  placeholder="Add a review comment (optional)..."
                   value={reviewComment}
                   onChange={e => setReviewComment(e.target.value)}
                   rows={3}
@@ -273,10 +262,7 @@ export function DURDetail() {
               </div>
             ) : (
               <div className="flex gap-2">
-                <Button
-                  onClick={() => setShowReviewInput('approve')}
-                  className="bg-green-600 hover:bg-green-700"
-                >
+                <Button onClick={() => setShowReviewInput('approve')} className="bg-green-600 hover:bg-green-700">
                   <CheckCircle className="w-4 h-4 mr-2" />
                   Approve & Merge
                 </Button>
@@ -300,7 +286,7 @@ export function DURDetail() {
       <div>
         <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
           <MessageSquare className="w-5 h-5" />
-          Comments ({comments?.length || 0})
+          Comments ({comments?.length ?? 0})
         </h2>
 
         <div className="space-y-4 mb-6">
@@ -308,12 +294,12 @@ export function DURDetail() {
             <div key={c.id} className="flex gap-3">
               <Avatar className="w-8 h-8">
                 <AvatarFallback className="text-xs">
-                  {c.author?.username?.charAt(0).toUpperCase() || '?'}
+                  {c.user?.username?.charAt(0).toUpperCase() ?? '?'}
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-medium">{c.author?.username}</span>
+                  <span className="text-sm font-medium">{c.user?.username}</span>
                   <span className="text-xs text-muted-foreground">
                     {new Date(c.created_at).toLocaleDateString()}
                   </span>
@@ -322,7 +308,6 @@ export function DURDetail() {
               </div>
             </div>
           ))}
-
           {(!comments || comments.length === 0) && (
             <p className="text-sm text-muted-foreground">No comments yet.</p>
           )}
