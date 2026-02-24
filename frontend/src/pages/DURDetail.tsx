@@ -19,33 +19,32 @@ const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'destructive' | 'o
   approved: 'secondary',
 }
 
-function DiffView({ original, proposed }: { original: string; proposed: string }) {
+// Compute unified diff chunks from two texts
+function computeDiff(original: string, proposed: string) {
   const originalLines = original.split('\n')
   const proposedLines = proposed.split('\n')
-
-  const diffLines: Array<{ type: 'same' | 'removed' | 'added'; content: string }> = []
+  const result: Array<{ type: 'same' | 'removed' | 'added'; content: string }> = []
 
   let i = 0, j = 0
   while (i < originalLines.length || j < proposedLines.length) {
-    const origLine = originalLines[i]
-    const propLine = proposedLines[j]
-
     if (i >= originalLines.length) {
-      diffLines.push({ type: 'added', content: propLine })
-      j++
+      result.push({ type: 'added', content: proposedLines[j++] })
     } else if (j >= proposedLines.length) {
-      diffLines.push({ type: 'removed', content: origLine })
-      i++
-    } else if (origLine === propLine) {
-      diffLines.push({ type: 'same', content: origLine })
+      result.push({ type: 'removed', content: originalLines[i++] })
+    } else if (originalLines[i] === proposedLines[j]) {
+      result.push({ type: 'same', content: originalLines[i] })
       i++; j++
     } else {
-      diffLines.push({ type: 'removed', content: origLine })
-      diffLines.push({ type: 'added', content: propLine })
-      i++; j++
+      result.push({ type: 'removed', content: originalLines[i++] })
+      result.push({ type: 'added', content: proposedLines[j++] })
     }
   }
+  return result
+}
 
+// Unified diff (single column)
+function DiffView({ original, proposed }: { original: string; proposed: string }) {
+  const diffLines = computeDiff(original, proposed)
   return (
     <div className="font-mono text-xs border rounded-md overflow-auto max-h-[500px]">
       {diffLines.map((line, idx) => (
@@ -65,6 +64,80 @@ function DiffView({ original, proposed }: { original: string; proposed: string }
           {line.content || ' '}
         </div>
       ))}
+    </div>
+  )
+}
+
+// Side-by-side diff (two columns, paired)
+function SideBySideDiff({ original, proposed }: { original: string; proposed: string }) {
+  const chunks = computeDiff(original, proposed)
+
+  // Pair removed/added lines so they sit next to each other
+  type Row = { left: string | null; right: string | null; type: 'same' | 'changed' | 'removed' | 'added' }
+  const rows: Row[] = []
+
+  let k = 0
+  while (k < chunks.length) {
+    const chunk = chunks[k]
+    if (chunk.type === 'same') {
+      rows.push({ left: chunk.content, right: chunk.content, type: 'same' })
+      k++
+    } else if (chunk.type === 'removed') {
+      // Peek ahead: pair with next 'added' if present
+      const next = chunks[k + 1]
+      if (next?.type === 'added') {
+        rows.push({ left: chunk.content, right: next.content, type: 'changed' })
+        k += 2
+      } else {
+        rows.push({ left: chunk.content, right: null, type: 'removed' })
+        k++
+      }
+    } else {
+      // standalone 'added'
+      rows.push({ left: null, right: chunk.content, type: 'added' })
+      k++
+    }
+  }
+
+  const cellClass = (side: 'left' | 'right', type: Row['type']) => {
+    const base = 'px-3 py-0.5 whitespace-pre-wrap w-1/2 align-top font-mono text-xs'
+    if (type === 'same') return `${base} bg-background text-foreground`
+    if (type === 'changed') {
+      return side === 'left'
+        ? `${base} bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200`
+        : `${base} bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-200`
+    }
+    if (type === 'removed') return side === 'left'
+      ? `${base} bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200`
+      : `${base} bg-muted/30`
+    if (type === 'added') return side === 'left'
+      ? `${base} bg-muted/30`
+      : `${base} bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-200`
+    return base
+  }
+
+  return (
+    <div className="border rounded-md overflow-auto max-h-[500px]">
+      {/* Header */}
+      <div className="flex border-b bg-muted/50 text-xs font-medium text-muted-foreground sticky top-0">
+        <div className="w-1/2 px-3 py-1.5 border-r">Current</div>
+        <div className="w-1/2 px-3 py-1.5">Proposed</div>
+      </div>
+      {/* Rows */}
+      <table className="w-full border-collapse">
+        <tbody>
+          {rows.map((row, idx) => (
+            <tr key={idx} className="border-b border-border/30 last:border-0">
+              <td className={cellClass('left', row.type)}>
+                {row.left ?? ''}
+              </td>
+              <td className={`${cellClass('right', row.type)} border-l border-border/30`}>
+                {row.right ?? ''}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -173,15 +246,22 @@ export function DURDetail() {
 
       {/* Diff tabs — single Tabs context wrapping both list and content */}
       <Card className="mb-6">
-        <Tabs defaultValue="diff">
+        <Tabs defaultValue="split">
           <CardHeader className="pb-0">
             <TabsList>
-              <TabsTrigger value="diff">Diff</TabsTrigger>
+              <TabsTrigger value="split">Split</TabsTrigger>
+              <TabsTrigger value="diff">Unified</TabsTrigger>
               <TabsTrigger value="proposed">Proposed</TabsTrigger>
               <TabsTrigger value="current">Current</TabsTrigger>
             </TabsList>
           </CardHeader>
           <CardContent className="pt-4">
+            <TabsContent value="split" className="mt-0">
+              {doc
+                ? <SideBySideDiff original={doc.current_content} proposed={dur.proposed_content} />
+                : <div className="text-sm text-muted-foreground py-4">Loading current document...</div>
+              }
+            </TabsContent>
             <TabsContent value="diff" className="mt-0">
               {doc
                 ? <DiffView original={doc.current_content} proposed={dur.proposed_content} />
