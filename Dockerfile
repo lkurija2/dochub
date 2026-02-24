@@ -31,4 +31,4 @@ COPY --from=frontend-builder /frontend/dist ./frontend/dist
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "until alembic upgrade head; do echo 'DB not ready, retrying in 3s...'; sleep 3; done && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

@@ -35,7 +35,10 @@ services:
       db:
         condition: service_healthy
     command: >
-      sh -c "alembic upgrade head &&
+      sh -c "until alembic upgrade head; do
+               echo 'DB not ready, retrying in 3s...';
+               sleep 3;
+             done &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   frontend:
