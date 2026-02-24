@@ -20,8 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install Python dependencies via uv (cached layer)
-COPY backend/pyproject.toml ./
-RUN uv pip install --system --no-cache .
+COPY backend/requirements.txt ./
+RUN uv pip install --system --no-cache -r requirements.txt
 
 # Copy backend source
 COPY backend/ ./
